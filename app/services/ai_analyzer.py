@@ -12,6 +12,9 @@ import warnings
 # Suppress the deprecation warning from google.generativeai
 warnings.filterwarnings("ignore", category=FutureWarning, module="google.generativeai")
 
+from io import BytesIO
+from PIL import Image
+
 import google.generativeai as genai
 from google.api_core.exceptions import GoogleAPIError
 
@@ -21,8 +24,9 @@ logger = logging.getLogger(__name__)
 
 genai.configure(api_key=settings.gemini_api_key)
 
-MODEL = "gemini-2.0-flash"
+MODEL = "gemini-2.5-flash-lite-preview-06-17"
 TEMPERATURE = 0.1
+MAX_OUTPUT_TOKENS = 1000
 
 SYSTEM_PROMPT = """Kamu adalah ahli gizi klinis dan food analyst berpengalaman.
 Spesialisasimu adalah estimasi porsi dan komposisi makronutrisi dari foto makanan.
@@ -80,8 +84,6 @@ Jika foto tidak mengandung makanan:
 {"error": "no_food", "message": "Foto ini tidak mengandung makanan."}"""
 
 
-from typing import Optional
-
 def _strip_markdown_fences(text: str) -> str:
     """Remove ```json ... ``` or ``` ... ``` wrappers from AI response."""
     text = text.strip()
@@ -91,36 +93,40 @@ def _strip_markdown_fences(text: str) -> str:
 
 
 async def analyze_food(
-    image_bytes: Optional[bytes] = None,
-    text_input: Optional[str] = None,
+    image_bytes: bytes = None,
+    text_input: str = None,
 ) -> dict:
     """
     Analyse food from image bytes and/or text description.
 
     Returns structured dict with keys: foods_detected, total, confidence, notes
-    On failure returns: {"error": "no_food"|"parse_error"|"api_error", "message": str}
+    On failure returns: {"error": "no_food"|"parse_error"|"api_error"|"rate_limit", "message": str}
 
     Never raises an exception.
     """
     try:
         model = genai.GenerativeModel(
             model_name=MODEL,
-            generation_config={"temperature": TEMPERATURE},
+            generation_config={
+                "temperature": TEMPERATURE,
+                "max_output_tokens": MAX_OUTPUT_TOKENS,
+            },
             system_instruction=SYSTEM_PROMPT,
         )
 
-        contents: list[dict | str] = []
+        contents = []
         if image_bytes:
-            contents.append({"mime_type": "image/jpeg", "data": image_bytes})
+            # Convert bytes to PIL Image
+            pil_image = Image.open(BytesIO(image_bytes))
             if text_input:
-                contents.append(f"Konteks dari user: {text_input}")
+                contents = [f"Konteks dari user: {text_input}", pil_image]
             else:
-                contents.append("Analisis semua makanan dalam foto ini.")
+                contents = ["Analisis semua makanan dalam foto ini.", pil_image]
         else:
-            contents.append(
+            contents = [
                 f"User mendeskripsikan makanannya secara teks: {text_input}. "
                 "Estimasikan nutrisi berdasarkan deskripsi ini."
-            )
+            ]
 
         response = await model.generate_content_async(contents)
 
@@ -144,9 +150,13 @@ async def analyze_food(
             return {"error": "parse_error", "message": "Gagal parse respons AI"}
 
     except GoogleAPIError as e:
+        error_message = str(e)
+        # Check for rate limit error (429)
+        if "429" in error_message or "quota" in error_message.lower() or "rate limit" in error_message.lower():
+            logger.warning("Gemini API rate limit hit: %s", e)
+            return {"error": "rate_limit", "message": "Rate limit, coba lagi dalam 1 menit"}
         logger.error("Gemini API error: %s", e)
         return {"error": "api_error", "message": str(e)}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.error("Unexpected error in analyze_food: %s", e, exc_info=True)
         return {"error": "api_error", "message": f"Error tak terduga: {e}"}
-

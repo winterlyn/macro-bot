@@ -1,24 +1,27 @@
 """
-app/services/ai_analyzer.py — GPT-4o-mini vision + text food analysis.
-Calls OpenAI API and returns structured nutrition JSON.
+app/services/ai_analyzer.py — Gemini 2.0 Flash vision + text food analysis.
+Calls Google Gemini API and returns structured nutrition JSON.
 Never raises exceptions — all errors returned as error dict.
 """
 
-import base64
 import json
 import logging
 import re
+import warnings
 
-from openai import APIError, AsyncOpenAI
+# Suppress the deprecation warning from google.generativeai
+warnings.filterwarnings("ignore", category=FutureWarning, module="google.generativeai")
+
+import google.generativeai as genai
+from google.api_core.exceptions import GoogleAPIError
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-client = AsyncOpenAI(api_key=settings.openai_api_key)
+genai.configure(api_key=settings.gemini_api_key)
 
-MODEL = "gpt-4o-mini"
-MAX_TOKENS = 1000
+MODEL = "gemini-2.0-flash"
 TEMPERATURE = 0.1
 
 SYSTEM_PROMPT = """Kamu adalah ahli gizi klinis dan food analyst berpengalaman.
@@ -77,6 +80,8 @@ Jika foto tidak mengandung makanan:
 {"error": "no_food", "message": "Foto ini tidak mengandung makanan."}"""
 
 
+from typing import Optional
+
 def _strip_markdown_fences(text: str) -> str:
     """Remove ```json ... ``` or ``` ... ``` wrappers from AI response."""
     text = text.strip()
@@ -86,8 +91,8 @@ def _strip_markdown_fences(text: str) -> str:
 
 
 async def analyze_food(
-    image_bytes: bytes = None,
-    text_input: str = None,
+    image_bytes: Optional[bytes] = None,
+    text_input: Optional[str] = None,
 ) -> dict:
     """
     Analyse food from image bytes and/or text description.
@@ -98,44 +103,28 @@ async def analyze_food(
     Never raises an exception.
     """
     try:
+        model = genai.GenerativeModel(
+            model_name=MODEL,
+            generation_config={"temperature": TEMPERATURE},
+            system_instruction=SYSTEM_PROMPT,
+        )
+
+        contents: list[dict | str] = []
         if image_bytes:
-            b64 = base64.b64encode(image_bytes).decode()
-            content: list = [
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
-                }
-            ]
+            contents.append({"mime_type": "image/jpeg", "data": image_bytes})
             if text_input:
-                content.append(
-                    {"type": "text", "text": f"Konteks dari user: {text_input}"}
-                )
+                contents.append(f"Konteks dari user: {text_input}")
             else:
-                content.append(
-                    {"type": "text", "text": "Analisis semua makanan dalam foto ini."}
-                )
-            messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": content},
-            ]
+                contents.append("Analisis semua makanan dalam foto ini.")
         else:
-            user_text = (
+            contents.append(
                 f"User mendeskripsikan makanannya secara teks: {text_input}. "
                 "Estimasikan nutrisi berdasarkan deskripsi ini."
             )
-            messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_text},
-            ]
 
-        response = await client.chat.completions.create(
-            model=MODEL,
-            messages=messages,
-            max_tokens=MAX_TOKENS,
-            temperature=TEMPERATURE,
-        )
+        response = await model.generate_content_async(contents)
 
-        raw_text = response.choices[0].message.content or ""
+        raw_text = response.text or ""
         logger.debug("Raw AI response: %s", raw_text)
 
         # First parse attempt
@@ -149,12 +138,15 @@ async def analyze_food(
         try:
             return json.loads(cleaned)
         except json.JSONDecodeError:
-            logger.warning("Failed to parse AI response after cleaning:\n%s", cleaned)
+            logger.warning(
+                "Failed to parse AI response after cleaning:\n%s", cleaned
+            )
             return {"error": "parse_error", "message": "Gagal parse respons AI"}
 
-    except APIError as e:
-        logger.error("OpenAI API error: %s", e)
+    except GoogleAPIError as e:
+        logger.error("Gemini API error: %s", e)
         return {"error": "api_error", "message": str(e)}
     except Exception as e:  # noqa: BLE001
         logger.error("Unexpected error in analyze_food: %s", e, exc_info=True)
         return {"error": "api_error", "message": f"Error tak terduga: {e}"}
+

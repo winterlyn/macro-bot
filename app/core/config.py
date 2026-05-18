@@ -20,8 +20,8 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ── OpenAI ────────────────────────────────────────────────────────────
-    openai_api_key: str
+    # ── Gemini ────────────────────────────────────────────────────────────
+    gemini_api_key: str
 
     # ── Telegram ──────────────────────────────────────────────────────────
     telegram_bot_token: str

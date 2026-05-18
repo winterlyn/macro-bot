@@ -76,7 +76,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 # ---------------------------------------------------------------------------
 
 # Map of shortcut keywords → handler function
-_SHORTCUTS: dict[tuple, object] = {
+_SHORTCUTS: dict[tuple[str, ...], object] = {
     ("total", "rekap"): cmd_total,
     ("history", "riwayat", "histori"): cmd_history,
     ("hapus terakhir", "delete last", "hapus"): cmd_delete,

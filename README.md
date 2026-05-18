@@ -1,6 +1,6 @@
 # Macro Tracker Bot 🤖🥗
 
-Personal Telegram bot untuk tracking makronutrisi harian. Analisis makanan via foto atau teks menggunakan GPT-4o-mini vision dengan estimasi setara ahli gizi klinis.
+Personal Telegram bot untuk tracking makronutrisi harian. Analisis makanan via foto atau teks menggunakan Google Gemini 2.0 Flash dengan estimasi setara ahli gizi klinis.
 
 ## Fitur
 
@@ -33,7 +33,7 @@ Edit `.env` dan isi semua variabel:
 
 | Variable | Cara Mendapatkan |
 |---|---|
-| `OPENAI_API_KEY` | https://platform.openai.com/api-keys |
+| `GEMINI_API_KEY` | https://aistudio.google.com/app/apikey |
 | `TELEGRAM_BOT_TOKEN` | Chat @BotFather di Telegram → `/newbot` |
 | `TELEGRAM_WEBHOOK_SECRET` | Generate: `python -c "import secrets; print(secrets.token_hex(16))"` |
 | `MY_TELEGRAM_USER_ID` | Chat @userinfobot di Telegram → lihat `Id:` |
@@ -120,7 +120,7 @@ Ketik langsung: `total`, `rekap`, `history`, `riwayat`, `hapus`, `help`, `bantua
 main.py          FastAPI + lifespan + webhook endpoint
 bot.py           PTB Application singleton + handler registration
 commands.py      Semua command & message handlers + formatter
-ai_analyzer.py   GPT-4o-mini vision/text analysis
+ai_analyzer.py   Gemini 2.0 Flash vision/text analysis
 database.py      SQLAlchemy async models + CRUD
 config.py        pydantic-settings + timezone constant
 ```

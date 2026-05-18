@@ -1,7 +1,7 @@
 """
-ai_analyzer.py — GPT-4o-mini vision + text food analysis.
+app/services/ai_analyzer.py — GPT-4o-mini vision + text food analysis.
 Calls OpenAI API and returns structured nutrition JSON.
-Never raises exceptions — all errors are returned as dict.
+Never raises exceptions — all errors returned as error dict.
 """
 
 import base64
@@ -9,9 +9,9 @@ import json
 import logging
 import re
 
-from openai import AsyncOpenAI, APIError
+from openai import APIError, AsyncOpenAI
 
-from config import settings
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -78,11 +78,9 @@ Jika foto tidak mengandung makanan:
 
 
 def _strip_markdown_fences(text: str) -> str:
-    """Remove ```json ... ``` or ``` ... ``` wrappers if present."""
+    """Remove ```json ... ``` or ``` ... ``` wrappers from AI response."""
     text = text.strip()
-    # Remove opening fence (```json or ```)
     text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
-    # Remove closing fence
     text = re.sub(r"\s*```$", "", text)
     return text.strip()
 
@@ -92,12 +90,10 @@ async def analyze_food(
     text_input: str = None,
 ) -> dict:
     """
-    Analyse food from an image (bytes) and/or text description.
+    Analyse food from image bytes and/or text description.
 
-    Returns a dict with keys:
-        foods_detected, total, confidence, notes
-    or an error dict:
-        {"error": "no_food"|"parse_error"|"api_error", "message": str}
+    Returns structured dict with keys: foods_detected, total, confidence, notes
+    On failure returns: {"error": "no_food"|"parse_error"|"api_error", "message": str}
 
     Never raises an exception.
     """
@@ -118,13 +114,11 @@ async def analyze_food(
                 content.append(
                     {"type": "text", "text": "Analisis semua makanan dalam foto ini."}
                 )
-
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content},
             ]
         else:
-            # Text-only mode
             user_text = (
                 f"User mendeskripsikan makanannya secara teks: {text_input}. "
                 "Estimasikan nutrisi berdasarkan deskripsi ini."
@@ -150,16 +144,13 @@ async def analyze_food(
         except json.JSONDecodeError:
             pass
 
-        # Second attempt after stripping markdown fences
+        # Second attempt: strip markdown fences
         cleaned = _strip_markdown_fences(raw_text)
         try:
             return json.loads(cleaned)
         except json.JSONDecodeError:
-            logger.warning("Failed to parse AI response after cleaning: %s", cleaned)
-            return {
-                "error": "parse_error",
-                "message": "Gagal parse respons AI",
-            }
+            logger.warning("Failed to parse AI response after cleaning:\n%s", cleaned)
+            return {"error": "parse_error", "message": "Gagal parse respons AI"}
 
     except APIError as e:
         logger.error("OpenAI API error: %s", e)

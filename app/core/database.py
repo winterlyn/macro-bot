@@ -1,8 +1,9 @@
 """
-database.py — SQLAlchemy async models + CRUD operations.
+app/core/database.py — SQLAlchemy async models + CRUD operations.
 Uses aiosqlite engine. All timestamps stored as UTC, displayed as WITA.
 """
 
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -21,7 +22,7 @@ from sqlalchemy import (
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from config import WITA, settings
+from app.core.config import WITA, settings
 
 logger = logging.getLogger(__name__)
 
@@ -77,14 +78,13 @@ class DailyTarget(Base):
 
 
 async def init_db() -> None:
-    """Create tables if they do not exist. Seed default daily target if empty."""
+    """Create all tables if they do not exist. Seed default daily target if empty."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(DailyTarget))
-        existing = result.scalar_one_or_none()
-        if existing is None:
+        if result.scalar_one_or_none() is None:
             session.add(DailyTarget(id=1))
             await session.commit()
             logger.info("Seeded default DailyTarget row.")
@@ -130,8 +130,6 @@ async def save_food_log(
     if len(description) > 500:
         description = description[:497] + "..."
 
-    import json
-
     log = FoodLog(
         update_id=update_id,
         timestamp=datetime.now(timezone.utc),
@@ -153,7 +151,7 @@ async def save_food_log(
 
 
 async def get_today_totals() -> dict:
-    """Sum all macros logged today (WITA). Returns dict with keys matching macro names."""
+    """Sum all macros logged today (WITA). Returns dict with macro totals."""
     start_utc, end_utc = _today_utc_range()
     async with AsyncSessionLocal() as session:
         result = await session.execute(
@@ -173,14 +171,13 @@ async def get_today_totals() -> dict:
         )
         row = result.one()
 
-    count = row[5] or 0
     return {
         "calories": row[0] or 0.0,
         "protein_g": row[1] or 0.0,
         "carbs_g": row[2] or 0.0,
         "fat_g": row[3] or 0.0,
         "fiber_g": row[4] or 0.0,
-        "entry_count": count,
+        "entry_count": row[5] or 0,
         "last_timestamp": row[6],
         "last_description": row[7],
     }
@@ -199,7 +196,7 @@ async def get_today_logs() -> list[FoodLog]:
 
 
 async def delete_last_today() -> FoodLog | None:
-    """Delete the most recent food log entry for today. Returns the deleted entry or None."""
+    """Delete the most recent food log entry for today. Returns deleted entry or None."""
     start_utc, end_utc = _today_utc_range()
     async with AsyncSessionLocal() as session:
         result = await session.execute(
@@ -230,10 +227,7 @@ async def delete_all_today() -> int:
 
 
 async def get_history(days: int = 7) -> list[dict]:
-    """
-    Return per-day summary for the last `days` days (WITA).
-    Each element: {"date": date, "calories": float, "protein_g": ..., ...}
-    """
+    """Return per-day summary for the last `days` days (WITA)."""
     now_wita = datetime.now(WITA)
     results = []
     for i in range(days):
